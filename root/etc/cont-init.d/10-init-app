@@ -1,0 +1,51 @@
+#!/usr/bin/with-contenv /bin/bash
+set -ex
+
+# Layout default directory structure
+mkdir -p /data/www
+mkdir -p /data/logs
+mkdir -p /data/tmp/nginx
+
+###
+# Initial provisioning
+###
+/provision-app.sh
+
+###
+# Check if DB already exists and is not empty
+###
+set +e
+RESULT=`mysql -u $DB_USER -p$DB_PASS -h $DB_HOST -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema ='${DB_DATABASE}'" --batch --skip-column-names`
+set -e
+if [[ $RESULT -gt 0 ]];
+	then
+		echo "Database already exists, skipping DB import"
+	else
+		###
+		# Import DB dump from AWS
+		###
+		if [ -z "$AWS_BACKUP_ARN" ]
+			then
+				echo "AWS_BACKUP_ARN not set, skipping"
+			else
+				if [ -z "$AWS_ENDPOINT" ]
+					then
+						aws s3 cp ${AWS_BACKUP_ARN}db.sql /data/www/Data/Persistent/db.sql
+					else
+						aws s3 --endpoint-url=$AWS_ENDPOINT cp ${AWS_BACKUP_ARN}db.sql /data/www/Data/Persistent/db.sql
+				fi
+		fi
+
+		###
+		# Create and import DB
+		###
+		echo "CREATE DATABASE IF NOT EXISTS $DB_DATABASE" | mysql -u $DB_USER -p$DB_PASS -h $DB_HOST
+		if [ -f /data/www/Data/Persistent/db.sql ]
+			then
+				mysql -u $DB_USER -p$DB_PASS -h $DB_HOST $DB_DATABASE < /data/www/Data/Persistent/db.sql
+		fi
+
+
+		cd /data/www
+
+fi
